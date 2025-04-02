@@ -29,23 +29,30 @@ DEFAULT_MODEL: str = "vgg16"
 DEFAULT_CLUSTER: str = "kmeans"
 DEFAULT_N_CLUSTERS: int = 2
 DEFAULT_LABELS: bool = True
-DEFAULT_DIMENSIONS: int = 1
+DEFAULT_DIMENSIONS: int = 2
 
 # Regex pattern to match filenames
 FILENAME_PATTERN = re.compile(r"test(\d+)_h(\d+)_(\d)\.jpg")
 
 FEATURES_FILENAME = f"results/{DEFAULT_MODEL}_h{DEFAULT_TIME_WINDOW}_t{'_'.join(map(str, DEFAULT_TESTS))}_a{'_'.join(map(str, DEFAULT_ANGLES))}.pkl"
 
-def save_feature_matrix(feature_matrix: np.ndarray, filename: str = FEATURES_FILENAME):
+
+if (not os.path.exists(BASE_FOLDER)):
+    raise SystemError(f"No {BASE_FOLDER} found")
+    
+if (not os.path.exists("plots")):
+    os.makedirs("plots")
+
+def save_time_features(time_features: np.ndarray, filename: str = FEATURES_FILENAME):
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, "wb") as f:
-        pickle.dump(feature_matrix, f)
+        pickle.dump(time_features, f)
 
-def load_feature_matrix(filename: str = FEATURES_FILENAME):
+def lead_time_features(filename: str = FEATURES_FILENAME):
     if os.path.exists(filename):
         with open(filename, "rb") as f:
-            matrix: np.ndarray = pickle.load(f)
-            return matrix
+            features: Dict[int, np.ndarray] = pickle.load(f)
+            return features
     return None
 
 def load_resnet50(freeze: bool = False, pooling: str = "avg"):
@@ -144,7 +151,7 @@ def elbowPlot(data, model, kRange):
     visualizer.fit(data)
     ax3.set_title('Silhouette')
     
-    plt.savefig(f"elbowplot-pca_{DEFAULT_MODEL}_{DEFAULT_CLUSTER}_h{DEFAULT_TIME_WINDOW}_v2.png")
+    plt.savefig(f"plots/elbowplot-pca_{DEFAULT_MODEL}_{DEFAULT_CLUSTER}_h{DEFAULT_TIME_WINDOW}_v2.png")
     plt.show()
 
 
@@ -196,10 +203,10 @@ def group_images_by_time_window(images: List[Tuple[str, int]], time_window: int)
 def process_images(model_name: str = DEFAULT_MODEL, angles: List[int] = DEFAULT_ANGLES, tests: List[int] = DEFAULT_TESTS, time_window: int = DEFAULT_TIME_WINDOW):
     """Processes images, extracts features, clusters them, and visualizes results."""
 
-    feature_matrix = load_feature_matrix()
+    time_features = lead_time_features()
     time_bins: List[int] = []
 
-    if feature_matrix is None:
+    if time_features is None:
         model, preprocess_function = load_pretrained_model(model_name)
         image_data: List[Tuple[str, int]] = []
 
@@ -239,18 +246,18 @@ def process_images(model_name: str = DEFAULT_MODEL, angles: List[int] = DEFAULT_
         if not time_features:
             print("No valid images found for processing.")
             return
-        
-        # Prepare data for clustering
-        time_bins = list(time_features.keys())
+    
+    
+    save_time_features(time_features)
 
-        feature_matrix = np.array(list(time_features.values()))
-        save_feature_matrix(feature_matrix)
+    # Prepare data for clustering
+    time_bins = list(time_features.keys())
+
+    feature_matrix = np.array(list(time_features.values()))
 
     pca = PCA(n_components=DEFAULT_DIMENSIONS)
     features_pca = pca.fit_transform(feature_matrix)
-    plotData(DEFAULT_DIMENSIONS, features_pca, time_bins)
-    # visualize1D(features_pca)
-    # visualize2D(features_pca, clusters, time_bins)
+    plotData(DEFAULT_DIMENSIONS, features_pca, time_bins=time_bins)
     
 
 def plotData(dimensions: int, feature_matrix: np.ndarray, time_bins: list[int] = []):
@@ -302,14 +309,14 @@ def visualize2D(feature_matrix: np.ndarray, time_bins: list[int]):
 
     if DEFAULT_LABELS:
         for i, time_bin in enumerate(time_bins):
-            plt.annotate(f"T{time_bin}", (feature_matrix[i, 0], feature_matrix[i, 1]))
+            plt.annotate(f"H{time_bin}", (feature_matrix[i, 0], feature_matrix[i, 1]))
 
 
     plt.xlabel("PCA Feature 1")
     plt.ylabel("PCA Feature 2")
     plt.legend()
     plt.title("Clusters of Image Feature Maps Over Time")
-    plt.savefig(f"cluster_plot_{DEFAULT_MODEL}__{DEFAULT_CLUSTER}-h{DEFAULT_TIME_WINDOW}_dnc{DEFAULT_N_CLUSTERS}_{'labels_' if DEFAULT_LABELS else ''}v2.png")
+    plt.savefig(f"plots/cluster_plot_{DEFAULT_MODEL}__{DEFAULT_CLUSTER}-h{DEFAULT_TIME_WINDOW}_dnc{DEFAULT_N_CLUSTERS}_{'labels_' if DEFAULT_LABELS else ''}v2.png")
     plt.show()
 
 # Run with default parameters
