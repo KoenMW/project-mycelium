@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Tuple
 from yellowbrick.cluster import KElbowVisualizer
 import scipy.cluster.hierarchy as sch
+import shutil
 
 # Set base folder
 BASE_FOLDER: str = "mycelium"
@@ -24,7 +25,7 @@ BASE_FOLDER: str = "mycelium"
 # Default parameters
 DEFAULT_ANGLES: List[int] = [1]
 DEFAULT_TESTS: List[int] = list(range(1, 7))
-DEFAULT_TIME_WINDOW: int = 24
+DEFAULT_TIME_WINDOW: int = 5
 DEFAULT_MODEL: str = "vgg16"
 DEFAULT_CLUSTER: str = "kmeans"
 DEFAULT_N_CLUSTERS: int = 2
@@ -200,6 +201,25 @@ def group_images_by_time_window(images: List[Tuple[str, int]], time_window: int)
 
     return grouped_images
 
+def label_and_copy_images(clusters: np.ndarray, time_bins: List[int], image_data: List[Tuple[str, int]], time_window: int):
+    """
+    Copies images into a labeled folder with the cluster ID prefixed to the filename.
+    """
+    labeled_folder = "mycelium_labeled"
+    os.makedirs(labeled_folder, exist_ok=True)
+
+    # Map time_bin to cluster
+    time_bin_to_cluster = dict(zip(time_bins, clusters))
+
+    for image_path, hours in image_data:
+        time_bin = hours // time_window
+        if time_bin in time_bin_to_cluster:
+            cluster_label = time_bin_to_cluster[time_bin] + 1
+            filename = os.path.basename(image_path)
+            new_filename = f"{cluster_label}_{filename}"
+            dest_path = os.path.join(labeled_folder, new_filename)
+            shutil.copy(image_path, dest_path)
+
 def process_images(model_name: str = DEFAULT_MODEL, angles: List[int] = DEFAULT_ANGLES, tests: List[int] = DEFAULT_TESTS, time_window: int = DEFAULT_TIME_WINDOW):
     """Processes images, extracts features, clusters them, and visualizes results."""
 
@@ -258,6 +278,11 @@ def process_images(model_name: str = DEFAULT_MODEL, angles: List[int] = DEFAULT_
     pca = PCA(n_components=DEFAULT_DIMENSIONS)
     features_pca = pca.fit_transform(feature_matrix)
     plotData(DEFAULT_DIMENSIONS, features_pca, time_bins=time_bins)
+
+    # Only label and copy if images were processed fresh
+    clusters = get_cluster(DEFAULT_CLUSTER, feature_matrix)
+    if image_data:
+        label_and_copy_images(clusters, time_bins, image_data, time_window)
     
 
 def plotData(dimensions: int, feature_matrix: np.ndarray, time_bins: list[int] = []):

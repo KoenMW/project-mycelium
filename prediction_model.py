@@ -3,12 +3,18 @@ import shutil
 from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
+import tensorflow as tf
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from tensorflow.keras.applications import VGG16
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, Flatten
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
+
+random_state = 42
+
+np.random.seed(random_state)
+tf.random.set_seed(random_state)
 
 # Define constants
 DATA_DIR: str = 'mycelium_labeled'
@@ -31,6 +37,7 @@ if os.path.exists(TEMP_DIR):
 os.makedirs(os.path.join(TEMP_DIR, READY), exist_ok=True)
 os.makedirs(os.path.join(TEMP_DIR, NOTREADY), exist_ok=True)
 
+image_count = 0
 for fname in os.listdir(DATA_DIR):
     if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
         class_name = fname.split('_')[0]
@@ -38,11 +45,26 @@ for fname in os.listdir(DATA_DIR):
             src_path = os.path.join(DATA_DIR, fname)
             dst_path = os.path.join(TEMP_DIR, class_name, fname)
             shutil.copyfile(src_path, dst_path)
+            image_count += 1
 
-# Load data with training and test split
-datagen = ImageDataGenerator(validation_split=0.2, rescale=1. / 255)
+print(f"Copied {image_count} images to TEMP_DIR.")
 
-train_generator = datagen.flow_from_directory(
+# Augmentation added to training data
+train_datagen = ImageDataGenerator(
+    validation_split=0.2,
+    rescale=1. / 255,
+    rotation_range=15,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    shear_range=0.1,
+    zoom_range=0.1,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+test_datagen = ImageDataGenerator(validation_split=0.2, rescale=1. / 255)
+
+train_generator = train_datagen.flow_from_directory(
     TEMP_DIR,
     target_size=IMG_SIZE,
     batch_size=BATCH_SIZE,
@@ -51,7 +73,7 @@ train_generator = datagen.flow_from_directory(
     shuffle=True
 )
 
-test_generator = datagen.flow_from_directory(
+test_generator = test_datagen.flow_from_directory(
     TEMP_DIR,
     target_size=IMG_SIZE,
     batch_size=1,
@@ -59,6 +81,10 @@ test_generator = datagen.flow_from_directory(
     subset='validation',
     shuffle=False
 )
+
+print("Training samples:", train_generator.samples)
+print("Validation samples:", test_generator.samples)
+
 
 # Load and modify VGG16 model
 base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
@@ -85,7 +111,6 @@ y_pred_probs = model.predict(test_generator)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
 cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-
 
 # Extract TP, TN, FP, FN
 # Ensure 2x2 shape
