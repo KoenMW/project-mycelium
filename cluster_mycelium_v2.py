@@ -25,7 +25,7 @@ BASE_FOLDER: str = "mycelium"
 # Default parameters
 DEFAULT_ANGLES: List[int] = [1]
 DEFAULT_TESTS: List[int] = list(range(1, 7))
-DEFAULT_TIME_WINDOW: int = 5
+DEFAULT_TIME_WINDOW: int = 2
 DEFAULT_MODEL: str = "vgg16"
 DEFAULT_CLUSTER: str = "kmeans"
 DEFAULT_N_CLUSTERS: int = 2

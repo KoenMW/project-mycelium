@@ -1,139 +1,166 @@
 import os
 import shutil
-from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from tensorflow.keras.applications import VGG16
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from keras.applications import ResNet50, VGG19 , VGG16
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, Flatten
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+from sklearn.utils import class_weight
 
-random_state = 42
+# --- SETTINGS ---
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+EPOCHS = 20
+DATA_DIR = "mycelium_labeled"  # your labeled data folder
+CLASSES = ['1', '2']  # subfolder names
+SEED = 42
+MODEL = "vgg19"
 
-np.random.seed(random_state)
-tf.random.set_seed(random_state)
+# --- Set seeds for reproducibility ---
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
 
-# Define constants
-DATA_DIR: str = 'mycelium_labeled'
-MODEL_DIR: str = 'model'
-TEMP_DIR: str = 'temp_data'
-PLOT_DIR: str = 'plots'
-IMG_SIZE: Tuple[int, int] = (224, 224)
-BATCH_SIZE: int = 32
-NUM_CLASSES: int = 2
+# --- Step 1: Load file paths and labels ---
+filepaths = []
+labels = []
 
-NOTREADY: str = "2"
-READY: str = "1"
+def load_resnet50(freeze: bool = False, pooling: str = "avg"):
+    base_model = ResNet50(weights='imagenet', include_top=False, pooling=pooling, input_shape=(224, 224, 3))
+    if freeze:
+        for layer in base_model.layers:
+            layer.trainable = False
+    model = Model(inputs=base_model.input, outputs=base_model.output)
+    return model
 
-CLASSES = [READY, NOTREADY]
+def load_vgg16(freeze: bool = False):
+    base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    if freeze:
+        for layer in base_model.layers:
+            layer.trainable = False
+    model = Model(inputs=base_model.input, outputs=output)
+    return model
 
-# Prepare directory structure
-if os.path.exists(TEMP_DIR):
-    shutil.rmtree(TEMP_DIR)
+def load_vgg19(freeze: bool = False):
+    base_model = VGG19(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    if freeze:
+        for layer in base_model.layers:
+            layer.trainable = False
+    model = Model(inputs=base_model.input, outputs=output)
+    return model
 
-os.makedirs(os.path.join(TEMP_DIR, READY), exist_ok=True)
-os.makedirs(os.path.join(TEMP_DIR, NOTREADY), exist_ok=True)
+for label in CLASSES:
+    class_path = os.path.join(DATA_DIR, label)
+    for fname in os.listdir(class_path):
+        if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+            filepaths.append(os.path.join(class_path, fname))
+            labels.append(label)
 
-image_count = 0
-for fname in os.listdir(DATA_DIR):
-    if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-        class_name = fname.split('_')[0]
-        if class_name in CLASSES:
-            src_path = os.path.join(DATA_DIR, fname)
-            dst_path = os.path.join(TEMP_DIR, class_name, fname)
-            shutil.copyfile(src_path, dst_path)
-            image_count += 1
+def load_pretrained_model(model_name: str, **kwargs):
+    model_loaders = {
+        "resnet50": load_resnet50,
+        "vgg16": load_vgg16,
+        "vgg19": load_vgg19,
+    }
+    
+    model_name = model_name.lower()
+    if model_name not in model_loaders:
+        raise ValueError(f"Model {model_name} not supported. Choose from: {list(model_loaders.keys())}")
+    
+    return model_loaders[model_name](**kwargs)
 
-print(f"Copied {image_count} images to TEMP_DIR.")
 
-# Augmentation added to training data
+# --- Step 2: Create a stratified train/val split ---
+train_files, val_files, y_train, y_val = train_test_split(
+    filepaths, labels, test_size=0.2, stratify=labels, random_state=SEED
+)
+
+# --- Step 3: Move to temp folders ---
+def setup_split_dir(split_dir, files, labels):
+    if os.path.exists(split_dir):
+        shutil.rmtree(split_dir)
+    for label in CLASSES:
+        os.makedirs(os.path.join(split_dir, label), exist_ok=True)
+    for f, label in zip(files, labels):
+        dst = os.path.join(split_dir, label, os.path.basename(f))
+        shutil.copy(f, dst)
+
+setup_split_dir("split/train", train_files, y_train)
+setup_split_dir("split/val", val_files, y_val)
+
+# --- Step 4: Image generators ---
 train_datagen = ImageDataGenerator(
-    validation_split=0.2,
-    rescale=1. / 255,
+    rescale=1./255,
     rotation_range=15,
     width_shift_range=0.1,
     height_shift_range=0.1,
     shear_range=0.1,
     zoom_range=0.1,
-    horizontal_flip=True,
-    fill_mode='nearest'
+    horizontal_flip=True
 )
 
-test_datagen = ImageDataGenerator(validation_split=0.2, rescale=1. / 255)
+val_datagen = ImageDataGenerator(rescale=1./255)
 
 train_generator = train_datagen.flow_from_directory(
-    TEMP_DIR,
+    "split/train",
     target_size=IMG_SIZE,
     batch_size=BATCH_SIZE,
-    class_mode='categorical',
-    subset='training',
-    shuffle=True
+    class_mode="categorical"
 )
 
-test_generator = test_datagen.flow_from_directory(
-    TEMP_DIR,
+val_generator = val_datagen.flow_from_directory(
+    "split/val",
     target_size=IMG_SIZE,
     batch_size=1,
-    class_mode='categorical',
-    subset='validation',
+    class_mode="categorical",
     shuffle=False
 )
 
-print("Training samples:", train_generator.samples)
-print("Validation samples:", test_generator.samples)
+# --- Step 5: Compute class weights ---
+y_train_labels = train_generator.classes
+class_weights = class_weight.compute_class_weight(
+    class_weight='balanced',
+    classes=np.unique(y_train_labels),
+    y=y_train_labels
+)
+class_weights = dict(enumerate(class_weights))
+print("Class weights:", class_weights)
 
-
-# Load and modify VGG16 model
-base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-for layer in base_model.layers[:-1]:
+# --- Step 6: Load Model base ---
+base_model = load_pretrained_model(MODEL)
+for layer in base_model.layers[:-4]:  # Fine-tune last 4 layers
     layer.trainable = False
 
 x = Flatten()(base_model.output)
 x = Dense(256, activation='relu')(x)
-output = Dense(NUM_CLASSES, activation='softmax')(x)
+output = Dense(len(CLASSES), activation='softmax')(x)
+
 model = Model(inputs=base_model.input, outputs=output)
 
-model.compile(optimizer=Adam(learning_rate=1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer=Adam(1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
 
-# Train the model
-model.fit(train_generator, validation_data=test_generator, epochs=10)
+# --- Step 7: Train the model ---
+model.fit(
+    train_generator,
+    validation_data=val_generator,
+    epochs=EPOCHS,
+    class_weight=class_weights
+)
 
-# Save the model
-os.makedirs(MODEL_DIR, exist_ok=True)
-model.save(os.path.join(MODEL_DIR, 'vgg16_mycelium_model.h5'))
-
-# Predictions and evaluation
-y_true = test_generator.classes
-y_pred_probs = model.predict(test_generator)
+# --- Step 8: Evaluate the model ---
+y_true = val_generator.classes
+y_pred_probs = model.predict(val_generator)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
-cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+print(classification_report(y_true, y_pred, target_names=CLASSES))
 
-# Extract TP, TN, FP, FN
-# Ensure 2x2 shape
-if cm.shape == (2, 2):
-    tn, fp, fn, tp = cm.ravel()
-else:
-    tn = fp = fn = tp = 0
-    if y_true[0] == 0:
-        tn = cm[0][0]
-    else:
-        tp = cm[0][0]
-
-accuracy = (tp + tn) / np.sum(cm)
-
-# Plot and save confusion matrix
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[NOTREADY, READY])
-disp.plot(cmap=plt.cm.Blues, values_format='d')
-plt.title(f'Confusion Matrix\nAccuracy: {accuracy:.2f}\nTP: {tp}, TN: {tn}, FP: {fp}, FN: {fn}')
-
-os.makedirs(PLOT_DIR, exist_ok=True)
-plt.savefig(os.path.join(PLOT_DIR, 'confusion_matrix.png'))
+cm = confusion_matrix(y_true, y_pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=CLASSES)
+disp.plot(cmap=plt.cm.Blues)
+plt.title("Validation Confusion Matrix")
 plt.show()
-plt.close()
-
-# Clean up temporary data
-shutil.rmtree(TEMP_DIR)
