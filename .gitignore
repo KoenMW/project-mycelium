@@ -2,3 +2,4 @@
 *.jpg
 model/*
 results/*
+mycelium_labeled/*
