@@ -11,6 +11,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, Flatten
 from tensorflow.keras.optimizers import Adam
 from sklearn.utils import class_weight
+import sklearn
 
 # --- SETTINGS ---
 IMG_SIZE = (224, 224)
@@ -25,6 +26,7 @@ MODEL = "vgg16"
 # --- Set seeds for reproducibility ---
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
+sklearn.random.seed(SEED)
 
 # --- Step 1: Load file paths and labels ---
 filepaths = []
@@ -35,24 +37,21 @@ def load_resnet50(freeze: bool = False, pooling: str = "avg"):
     if freeze:
         for layer in base_model.layers:
             layer.trainable = False
-    model = Model(inputs=base_model.input, outputs=base_model.output)
-    return model
+    return base_model
 
 def load_vgg16(freeze: bool = False):
     base_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
     if freeze:
         for layer in base_model.layers:
             layer.trainable = False
-    model = Model(inputs=base_model.input, outputs=output)
-    return model
+    return base_model
 
 def load_vgg19(freeze: bool = False):
     base_model = VGG19(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
     if freeze:
         for layer in base_model.layers:
             layer.trainable = False
-    model = Model(inputs=base_model.input, outputs=output)
-    return model
+    return base_model
 
 for label in CLASSES:
     class_path = os.path.join(DATA_DIR, label)
