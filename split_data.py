@@ -1,14 +1,13 @@
 import os
 import re
 import shutil
-from pathlib import Path
 from typing import List
 
 # === Configuration ===
 DEFAULT_HOUR_SPLIT: int = 24
 DEFAULT_SOURCE_FOLDER: str = "mycelium"
 DEFAULT_OUTPUT_FOLDER: str = "mycelium_labeled"
-DEFAULT_TESTS_TO_INCLUDE: List[int] = [2, 4, 5, 6]
+DEFAULT_TESTS_TO_INCLUDE: List[int] = [2, 4, 5, 6, 7, 8]
 DEFAULT_ANGLES: List[int] = [1]
 
 
