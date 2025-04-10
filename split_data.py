@@ -8,7 +8,8 @@ from typing import List
 DEFAULT_HOUR_SPLIT: int = 24
 DEFAULT_SOURCE_FOLDER: str = "mycelium"
 DEFAULT_OUTPUT_FOLDER: str = "mycelium_labeled"
-DEFAULT_TESTS_TO_INCLUDE: List[int] = [1, 2, 3, 4, 5, 6]
+DEFAULT_TESTS_TO_INCLUDE: List[int] = [2, 4, 5, 6]
+DEFAULT_ANGLES: List[int] = [1]
 
 
 def split_mycelium_by_hours(
@@ -31,8 +32,9 @@ def split_mycelium_by_hours(
 
     # Extract test number and hour from each file and filter by test number
     for f in files:
-        test_match = re.search(r'test(\d+)_h(\d+)_', f)
-        if test_match:
+        test_match = re.search(r'test(\d+)_h(\d+)_(\d+)', f)
+        if test_match and int(test_match.group(3)) in DEFAULT_ANGLES:
+            print(int(test_match.group(3)))
             test_num: int = int(test_match.group(1))
             hour: int = int(test_match.group(2))
             if test_num in tests_to_include:
