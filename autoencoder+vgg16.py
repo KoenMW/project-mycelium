@@ -169,20 +169,29 @@ y_pred = np.argmax(y_pred_probs, axis=1)
 print(classification_report(y_true, y_pred, target_names=CLASSES))
 cm = confusion_matrix(y_true, y_pred)
 
-# --- FUZZY ACCURACY ---
-def fuzzy_accuracy(y_true, y_pred, threshold_day=9):
+# --- ADJUSTED FUZZY ACCURACY ---
+def fuzzy_accuracy(y_true, y_pred, max_day=14):
     correct = 0
     for true, pred in zip(y_true, y_pred):
-        tolerance = 2 if true >= threshold_day else 1
-        if abs(true - pred) <= tolerance:
+        lower = max(0, true - 1)
+        upper = min(max_day, true + 1)
+        if lower <= pred <= upper:
             correct += 1
     return correct / len(y_true)
 
+# --- METRICS REPORT ---
+exact_accuracy = np.mean(y_true == y_pred)
 fuzzy_acc = fuzzy_accuracy(y_true, y_pred)
-print(f"Fuzzy Accuracy (±1 day, ±2 from day 9): {fuzzy_acc:.4f}")
 
-# --- PLOT CONFUSION MATRIX ---
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=CLASSES)
-disp.plot(cmap=plt.cm.Blues)
-plt.title("Validation Confusion Matrix")
+print(f"Exact Accuracy: {exact_accuracy:.4f}")
+print(f"Fuzzy Accuracy (±1 day within bounds): {fuzzy_acc:.4f}")
+
+# --- CONFUSION MATRIX PLOT ---
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[str(i) for i in range(15)])
+fig, ax = plt.subplots(figsize=(10, 8))
+disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation=45)
+ax.set_title("Validation Confusion Matrix")
+ax.set_xlabel("Predicted Day")
+ax.set_ylabel("True Day")
+plt.tight_layout()
 plt.show()
