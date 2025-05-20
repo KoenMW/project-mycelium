@@ -1,4 +1,3 @@
-# --- IMPORTS ---
 import os
 import shutil
 import numpy as np
@@ -10,38 +9,35 @@ from sklearn.utils import class_weight
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from keras.applications import VGG16
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Flatten, Input, Concatenate, Conv2D, MaxPooling2D, UpSampling2D
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Flatten, Dense, Concatenate
 from tensorflow.keras.optimizers import Adam
 
-# --- SETTINGS ---
+# Configuration
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 32
 EPOCHS = 20
 DATA_DIR = "mycelium_labeled"
-
-# Only keep classes from day 0 to day 14
-CLASSES = [str(i) for i in range(15)]  # Class names as day 0, 1, ..., 14
+CLASSES = [str(i) for i in range(15)]
 SEED = 42
-
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
-# --- LOAD FILE PATHS ---
+# Load image paths and labels
 filepaths, labels = [], []
 for label in CLASSES:
     class_path = os.path.join(DATA_DIR, label)
-    if os.path.exists(class_path):  # Check if class folder exists
+    if os.path.exists(class_path):
         for fname in os.listdir(class_path):
             if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
                 filepaths.append(os.path.join(class_path, fname))
                 labels.append(label)
 
-# --- TRAIN/VAL SPLIT ---
+# Train-validation split
 train_files, val_files, y_train, y_val = train_test_split(
     filepaths, labels, test_size=0.2, stratify=labels, random_state=SEED
 )
 
-# --- SETUP SPLIT DIRECTORIES ---
+# Create directory structure for ImageDataGenerator
 def setup_split_dir(split_dir, files, labels):
     if os.path.exists(split_dir):
         shutil.rmtree(split_dir)
@@ -53,7 +49,7 @@ def setup_split_dir(split_dir, files, labels):
 setup_split_dir("split/train", train_files, y_train)
 setup_split_dir("split/val", val_files, y_val)
 
-# --- IMAGE GENERATORS ---
+# Data generators
 train_datagen = ImageDataGenerator(
     rescale=1./255,
     rotation_range=15,
@@ -72,16 +68,12 @@ val_generator = val_datagen.flow_from_directory(
     "split/val", target_size=IMG_SIZE, batch_size=1, class_mode="categorical", shuffle=False, classes=CLASSES
 )
 
-# --- CLASS WEIGHTS ---
+# Compute class weights
 y_train_labels = train_generator.classes
-weights = class_weight.compute_class_weight(
-    class_weight='balanced',
-    classes=np.unique(y_train_labels),
-    y=y_train_labels
-)
+weights = class_weight.compute_class_weight('balanced', classes=np.unique(y_train_labels), y=y_train_labels)
 class_weights = dict(enumerate(weights))
 
-# --- AUTOENCODER MODEL ---
+# Build autoencoder
 def build_autoencoder(input_shape=(224, 224, 3)):
     input_img = Input(shape=input_shape)
     x = Conv2D(32, (3, 3), activation='relu', padding='same')(input_img)
@@ -100,13 +92,12 @@ def build_autoencoder(input_shape=(224, 224, 3)):
     autoencoder.compile(optimizer='adam', loss='mse')
     return autoencoder, encoder
 
-# --- AUTOENCODER DATA GENERATOR ---
 def autoencoder_data_generator(generator):
     while True:
         x, _ = next(generator)
         yield x, x
 
-# --- TRAIN AUTOENCODER ---
+# Train autoencoder
 autoencoder, encoder = build_autoencoder()
 autoencoder.fit(
     autoencoder_data_generator(train_generator),
@@ -116,7 +107,7 @@ autoencoder.fit(
     epochs=20
 )
 
-# --- HYBRID MODEL (VGG16 + ENCODER) ---
+# Hybrid model (VGG16 + Encoder)
 vgg_base = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 for layer in vgg_base.layers[:-4]:
     layer.trainable = False
@@ -133,25 +124,23 @@ output = Dense(len(CLASSES), activation='softmax')(x)
 hybrid_model = Model(inputs=[vgg_base.input, encoder_input], outputs=output)
 hybrid_model.compile(optimizer=Adam(1e-4), loss='categorical_crossentropy', metrics=['accuracy'])
 
-# --- TF.DATA WRAPPER FOR DUAL INPUTS ---
+# Prepare tf.data.Dataset from ImageDataGenerator
 def make_dual_input_dataset(generator):
     output_signature = (
         (tf.TensorSpec(shape=(None, 224, 224, 3), dtype=tf.float32),
          tf.TensorSpec(shape=(None, 224, 224, 3), dtype=tf.float32)),
         tf.TensorSpec(shape=(None, len(CLASSES)), dtype=tf.float32)
     )
-
     def gen():
         while True:
             x, y = next(generator)
             yield (x, x), y
-
     return tf.data.Dataset.from_generator(gen, output_signature=output_signature)
 
 train_dataset = make_dual_input_dataset(train_generator).repeat()
 val_dataset = make_dual_input_dataset(val_generator)
 
-# --- TRAIN HYBRID MODEL ---
+# Train hybrid model
 hybrid_model.fit(
     train_dataset,
     steps_per_epoch=len(train_generator),
@@ -161,33 +150,39 @@ hybrid_model.fit(
     class_weight=class_weights
 )
 
-# --- EVALUATION ---
-y_true = val_generator.classes
-y_pred_probs = hybrid_model.predict(val_dataset, steps=len(val_generator))
+# Save model
+hybrid_model.save("hybrid_model.h5")
+encoder.save("encoder_model.h5")
+autoencoder.save("autoencoder_model.h5")
+
+# Evaluate model with correct inputs
+val_generator.reset()
+X_val, y_val_true = [], []
+for i in range(len(val_generator)):
+    x, y = val_generator.next()
+    X_val.append(x)
+    y_val_true.append(y)
+X_val = np.concatenate(X_val)
+y_val_true = np.argmax(np.concatenate(y_val_true), axis=1)
+
+# Predict using hybrid model
+y_pred_probs = hybrid_model.predict([X_val, X_val], batch_size=1)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
-print(classification_report(y_true, y_pred, target_names=CLASSES))
-cm = confusion_matrix(y_true, y_pred)
+# Classification report and confusion matrix
+print("\nClassification Report:")
+print(classification_report(y_val_true, y_pred, target_names=CLASSES))
+cm = confusion_matrix(y_val_true, y_pred)
 
-# --- ADJUSTED FUZZY ACCURACY ---
+# Fuzzy accuracy metric
 def fuzzy_accuracy(y_true, y_pred, max_day=14):
-    correct = 0
-    for true, pred in zip(y_true, y_pred):
-        lower = max(0, true - 1)
-        upper = min(max_day, true + 1)
-        if lower <= pred <= upper:
-            correct += 1
-    return correct / len(y_true)
+    return np.mean([max(0, true - 1) <= pred <= min(max_day, true + 1) for true, pred in zip(y_true, y_pred)])
 
-# --- METRICS REPORT ---
-exact_accuracy = np.mean(y_true == y_pred)
-fuzzy_acc = fuzzy_accuracy(y_true, y_pred)
+print(f"Exact Accuracy: {np.mean(y_val_true == y_pred):.4f}")
+print(f"Fuzzy Accuracy (±1 day): {fuzzy_accuracy(y_val_true, y_pred):.4f}")
 
-print(f"Exact Accuracy: {exact_accuracy:.4f}")
-print(f"Fuzzy Accuracy (±1 day within bounds): {fuzzy_acc:.4f}")
-
-# --- CONFUSION MATRIX PLOT ---
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[str(i) for i in range(15)])
+# Plot confusion matrix
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=CLASSES)
 fig, ax = plt.subplots(figsize=(10, 8))
 disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation=45)
 ax.set_title("Validation Confusion Matrix")
